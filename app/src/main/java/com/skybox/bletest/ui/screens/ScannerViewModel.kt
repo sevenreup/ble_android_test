@@ -2,20 +2,29 @@ package com.skybox.bletest.ui.screens
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.bluetooth.BluetoothDevice
 import androidx.bluetooth.BluetoothLe
 import androidx.bluetooth.ScanResult
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.skybox.bletest.data.DeviceConnection
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.DurationUnit
+import kotlin.time.nanoseconds
+import kotlin.time.toDuration
 
 class ScannerViewModel : ViewModel() {
 
@@ -28,9 +37,14 @@ class ScannerViewModel : ViewModel() {
     private lateinit var bluetoothLe: BluetoothLe
     var isScanning = mutableStateOf(false)
 
-    val scanResults: MutableState<List<ScanResult>>
-        get() = _scanResults
-    private val _scanResults = mutableStateOf(listOf<ScanResult>())
+    val scanResults: Flow<List<ScanResult>>
+        get() = _scanResults.map {
+            it.filter { scanResult ->
+                scanResult.isConnectable()
+            }
+        }
+
+    private val _scanResults = MutableStateFlow<List<ScanResult>>(listOf())
     private val _scanResultsMap = mutableMapOf<String, ScanResult>()
 
     internal val deviceConnections: Set<DeviceConnection> get() = _deviceConnections
@@ -46,13 +60,11 @@ class ScannerViewModel : ViewModel() {
         bluetoothLe = BluetoothLe(context)
     }
 
-    fun addScanResultIfNew(scanResult: ScanResult) {
+    private fun addScanResultIfNew(scanResult: ScanResult) {
         val deviceAddress = scanResult.deviceAddress.address
 
-        if (_scanResultsMap.containsKey(deviceAddress).not()) {
-            _scanResultsMap[deviceAddress] = scanResult
-            _scanResults.value = _scanResultsMap.values.toList()
-        }
+        _scanResultsMap[deviceAddress] = scanResult
+        _scanResults.value = _scanResultsMap.values.toList()
     }
 
     fun addDeviceConnectionIfNew(bluetoothDevice: BluetoothDevice): Int {
@@ -76,20 +88,31 @@ class ScannerViewModel : ViewModel() {
         _deviceConnections.remove(deviceConnection)
     }
 
+    private fun startPeriodicTask() {
+   viewModelScope.launch(Dispatchers.Default) {
+            while (isScanning.value) {
+                Log.e(TAG, "startPeriodicTask: cleaning")
+                removeUnavailableDevices()
+                delay(10000) // 10 seconds
+            }
+        }
+    }
+
 
     @SuppressLint("MissingPermission")
     fun startScan() {
         Log.d(TAG, "startScan() called")
         viewModelScope.launch {
             Log.d(TAG, "bluetoothLe.scan() called")
-
             isScanning.value = true
-
+            startPeriodicTask()
             try {
                 bluetoothLe.scan()
                     .collect {
-                        Log.d(TAG, "bluetoothLe.scan() collected: ScanResult = $it")
-
+                        Log.d(
+                            TAG,
+                            "bluetoothLe.scan() collected: ScanResult = ${it.device.bondState}"
+                        )
                         addScanResultIfNew(it)
                     }
             } catch (exception: Exception) {
@@ -102,8 +125,23 @@ class ScannerViewModel : ViewModel() {
         }
     }
 
+    fun removeUnavailableDevices() {
+        val currentTime = System.currentTimeMillis()
+        val devicesToKeep = mutableListOf<ScanResult>()
+
+        for (scannedDevice in _scanResults.value) {
+            if (currentTime - scannedDevice.timestampNanos < DEVICE_TIMEOUT * 1000000) {
+                devicesToKeep.add(scannedDevice)
+            }
+        }
+
+        _scanResults.value = devicesToKeep
+    }
+
     fun deviceConnection(position: Int): DeviceConnection {
         // Index 0 is Results page; Tabs for devices start from 1.
         return deviceConnections.elementAt(position - 1)
     }
 }
+
+private const val DEVICE_TIMEOUT: Long = 10000

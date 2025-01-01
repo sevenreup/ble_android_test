@@ -3,12 +3,15 @@ package com.skybox.bletest.ui.screens
 import android.annotation.SuppressLint
 import androidx.bluetooth.ScanResult
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.BottomSheetScaffold
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
@@ -16,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -29,7 +33,7 @@ import kotlinx.coroutines.launch
 fun ScannerScreen(viewModel: ScannerViewModel = androidx.lifecycle.viewmodel.compose.viewModel()) {
 
     val context = LocalContext.current
-    val devices by remember { viewModel.scanResults }
+    val devices by viewModel.scanResults.collectAsState(initial = listOf())
     val isScanning by remember {
         viewModel.isScanning
     }
@@ -50,9 +54,12 @@ fun ScannerScreen(viewModel: ScannerViewModel = androidx.lifecycle.viewmodel.com
             }
         }) { innerPadding ->
         LazyColumn(
-            Modifier
+            modifier = Modifier
                 .padding(innerPadding)
-                .fillMaxWidth()) {
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(10.dp)
+        ) {
             stickyHeader {
                 Card(modifier = Modifier
                     .fillMaxWidth()
@@ -69,7 +76,9 @@ fun ScannerScreen(viewModel: ScannerViewModel = androidx.lifecycle.viewmodel.com
                     }
                 }
             }
-            items(devices.size) { index ->
+            items(count = devices.size, key = {
+                devices[it].deviceAddress.address
+            }) { index ->
                 val item = devices[index]
 
                 DeviceCard(result = item) {
@@ -91,12 +100,15 @@ fun ScannerScreen(viewModel: ScannerViewModel = androidx.lifecycle.viewmodel.com
 @Composable
 fun DeviceCard(result: ScanResult, onClick: (result: ScanResult) -> Unit) {
     Card (
-        onClick = {
-            onClick(result)
-        },
         modifier = Modifier.fillMaxWidth()
     ){
-        Text(text = result.device.name ?: "Unkonwn")
+        Column(Modifier.padding(8.dp)) {
+            Text(text = result.deviceAddress.address)
+            Text(text = result.device.name ?: "Unkonwn")
+            Button(onClick = { onClick(result) }) {
+                Text(text = "Connect")
+            }
+        }
     }
 
 }
